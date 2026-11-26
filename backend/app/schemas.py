@@ -26,6 +26,14 @@ class ProjectOut(ProjectCreate):
     class Config:
         from_attributes = True
 
+class ProjectUpdate(BaseModel):
+    title: str | None = None
+    location: str | None = None
+    area_sqm: float| None = None
+    description: str | None = None
+    image_url: str | None = None
+    is_published: bool | None = None
+
 class ApplicationCreate(BaseModel):
     client_name: str = Field(..., min_length=2)
     phone: str = Field(..., min_length=6)

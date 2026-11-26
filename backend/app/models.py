@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean
 from .database import Base
 
 class Service(Base):
@@ -21,6 +21,7 @@ class Project(Base):
     area_sqm = Column(Float, nullable=False)
     description = Column(Text, nullable=False)
     image_url = Column(String(255), nullable=False)
+    is_published = Column(Boolean, nullable=False, default=False)
 
 class Application(Base):
     __tablename__ = "applications"
