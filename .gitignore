@@ -20,3 +20,4 @@ out/
 
 *.pem
 *.key
+/stroyprofi_backup.sql
