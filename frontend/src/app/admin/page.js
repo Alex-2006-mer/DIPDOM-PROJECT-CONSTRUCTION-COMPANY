@@ -2,6 +2,7 @@
 import { useState } from 'react';
 
 export default function AdminPage() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
   const [applications, setApplications] = useState([]);
@@ -14,25 +15,59 @@ export default function AdminPage() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    const res = await fetch(`${apiUrl}/api/admin/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (res.ok) {
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${apiUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!res.ok) {
+        throw new Error('Не удалось войти. Проверьте данные');
+      }
+
       const data = await res.json();
-      setToken(data.token);
-      loadApplications(data.token);
-    } else {
-      alert('Неверный пароль');
+      const accessToken = data.access_token;
+
+      const userRes = await fetch(`${apiUrl}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      });
+
+      if (!userRes.ok) {
+        throw new Error('Не удалось получить данные пользователя');
+      }
+
+      const user = await userRes.json();
+
+      if (user.role !== 'admin') {
+        throw new Error('Недостаточно прав доступа');
+      }
+
+      setToken(accessToken);
+      setPassword('');
+      await loadApplications(accessToken);
+
+    } catch (error) {
+      setErrorMsg(error.message);
     }
   };
 
   const loadApplications = async (authToken) => {
     const res = await fetch(`${apiUrl}/api/admin/applications`, {
-      headers: { 'x-admin-token': authToken }
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
     });
-    if (res.ok) setApplications(await res.json());
+
+    if (!res.ok) {
+      throw new Error('Не удалось загрузить заявки');
+    }
+
+    setApplications(await res.json());
   };
 
   const changeStatus = async (id, newStatus) => {
@@ -43,7 +78,7 @@ export default function AdminPage() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': token,
+          Authorization: 'Bearer ${token}',
         },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -64,7 +99,6 @@ export default function AdminPage() {
     e.preventDefault();
     const res = await fetch(`${apiUrl}/api/admin/services`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
       body: JSON.stringify({
         title,
         category,
@@ -80,19 +114,71 @@ export default function AdminPage() {
     }
   };
 
-  if (!token) {
-    return (
-      <form onSubmit={handleLogin} style={{ maxWidth: '350px', margin: '40px auto' }}>
-        <h2>Вход в панель администратора</h2>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '12px' }} />
-        <button type="submit" style={{ padding: '10px 20px', background: '#1e293b', color: '#fff', border: 'none' }}>Войти</button>
-      </form>
-    );
-  }
+ if (!token) {
+  return (
+    <form
+      onSubmit={handleLogin}
+      style={{ maxWidth: '350px', margin: '40px auto' }}
+    >
+      <h2>Вход в панель администратора</h2>
+
+      {errorMsg && (
+        <p role="alert" style={{ color: 'red' }}>
+          {errorMsg}
+        </p>
+      )}
+
+      <input
+        required
+        type="email"
+        placeholder="Электронная почта"
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        style={{
+          width: '100%',
+          padding: '10px',
+          marginBottom: '12px'
+        }}
+      />
+
+      <input
+        required
+        type="password"
+        placeholder="Пароль"
+        value={password}
+        onChange={e => setPassword(e.target.value)}
+        style={{
+          width: '100%',
+          padding: '10px',
+          marginBottom: '12px'
+        }}
+      />
+
+      <button
+        type="submit"
+        style={{
+          padding: '10px 20px',
+          background: '#1e293b',
+          color: '#fff',
+          border: 'none'
+        }}
+      >
+        Войти
+      </button>
+    </form>
+  );
+}
 
   return (
     <div>
       <h1>Административная панель</h1>
+          <button onClick={() => {
+      setToken('');
+      setApplications([]);
+      setErrorMsg('');
+    }}>
+      Выйти
+    </button>
 
       <h2>Поступившие заявки ({applications.length})</h2>
       {errorMsg && <p role="alert" style={{ color: 'red' }}>{errorMsg}</p>}
