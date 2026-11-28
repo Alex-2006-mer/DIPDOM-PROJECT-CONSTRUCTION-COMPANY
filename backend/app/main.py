@@ -4,6 +4,10 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from app.security import (hash_password, verify_password, create_access_token)
+from app.dependencies import get_current_user, require_admin
 from . import models, schemas
 from .database import get_db
 
@@ -15,24 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-def require_admin_password() -> str:
-    password = os.getenv("ADMIN_PASSWORD")
-    if not password or not password.strip():
-        raise RuntimeError("Пароль не задан !!!(Переменная ADMIN_PASSWORD обязательна)!!!")
-    return password
-
-ADMIN_PASSWORD = require_admin_password()
-
-
-def verify_admin(x_admin_token: Optional[str] = Header(default=None)):
-    if not x_admin_token or not secrets.compare_digest(
-        x_admin_token, ADMIN_PASSWORD
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Неверный токен администратора",
-        )
 
 
 @app.get("/api/services",
@@ -62,16 +48,98 @@ def create_application(payload: schemas.ApplicationCreate,
     return new_app
 
 
-@app.post("/api/admin/login")
-def admin_login(data: dict):
-    if data.get("password") == ADMIN_PASSWORD:
-        return {"token": ADMIN_PASSWORD}
-    raise HTTPException(status_code=401, detail="Неверный пароль")
+@app.post(
+    "/api/auth/register",
+    response_model=schemas.UserOut,
+    status_code=201
+)
+def register(
+    user: schemas.UserCreate,
+    db: Session = Depends(get_db)
+):
+    email = user.email.lower()
+
+    existing_user = db.scalar(
+        select(models.User).where(models.User.email == email)
+    )
+
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="Пользователь с такой почтой уже существует"
+        )
+
+    new_user = models.User(
+        name=user.name,
+        email=email,
+        password_hash=hash_password(user.password),
+        role="user",
+        is_active=True
+    )
+
+    db.add(new_user)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Не удалось зарегистрировать пользователя"
+        )
+
+    db.refresh(new_user)
+
+    return new_user
+
+
+@app.post("/api/auth/login", response_model=schemas.Token)
+def login(
+    user: schemas.UserLogin,
+    db: Session = Depends(get_db)
+):
+    db_user = db.scalar(
+        select(models.User).where(
+            models.User.email == user.email.lower()
+        )
+    )
+
+    if not db_user or not verify_password(
+        user.password, db_user.password_hash
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Неверная почта или пароль"
+        )
+
+    if not db_user.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Аккаунт заблокирован"
+        )
+
+    token = create_access_token(db_user.id)
+
+    return schemas.Token(access_token=token)
+
+
+@app.get("/api/auth/me", response_model=schemas.UserOut)
+def get_me(
+    current_user: models.User = Depends(get_current_user)
+):
+    return current_user
+
+
+@app.get("/api/admin/check")
+def check_admin(
+    admin: models.User = Depends(require_admin)
+):
+    return {"message": "Доступ разрешён"}
 
 
 @app.get("/api/admin/applications",
          response_model=List[schemas.ApplicationOut],
-         dependencies=[Depends(verify_admin)],
+         dependencies=[Depends(require_admin)],
          )
 def admin_list_applications(db: Session = Depends(get_db)):
     return db.query(models.Application).order_by(models.Application.created_at.desc()).all()
@@ -79,7 +147,7 @@ def admin_list_applications(db: Session = Depends(get_db)):
 
 @app.patch("/api/admin/applications/{app_id}",
            response_model=schemas.ApplicationOut,
-           dependencies=[Depends(verify_admin)],
+           dependencies=[Depends(require_admin)],
            )
 def admin_update_status(app_id: int,
                         payload: schemas.StatusUpdate,
@@ -96,7 +164,7 @@ def admin_update_status(app_id: int,
 
 @app.post("/api/admin/projects",
           response_model=schemas.ProjectOut,
-          dependencies=[Depends(verify_admin)],
+          dependencies=[Depends(require_admin)],
           )
 def add_project(payload: schemas.ProjectCreate,
                 db: Session = Depends(get_db),
@@ -110,7 +178,7 @@ def add_project(payload: schemas.ProjectCreate,
 
 @app.patch("/api/admin/projects/{project_id}",
            response_model=schemas.ProjectOut,
-           dependencies=[Depends(verify_admin)],
+           dependencies=[Depends(require_admin)],
            )
 def update_projects(project_id: int,
                     payload: schemas.ProjectUpdate,
@@ -138,7 +206,7 @@ def update_projects(project_id: int,
 
 @app.post("/api/admin/services",
           response_model=schemas.ServiceOut,
-          dependencies=[Depends(verify_admin)],
+          dependencies=[Depends(require_admin)],
           )
 def admin_create_service(payload: schemas.ServiceCreate,
                          db: Session = Depends(get_db),
@@ -152,7 +220,7 @@ def admin_create_service(payload: schemas.ServiceCreate,
 
 
 @app.delete("/api/admin/services/{service_id}",
-            dependencies=[Depends(verify_admin)],
+            dependencies=[Depends(require_admin)],
             )
 def delete_service(service_id: int, db: Session = Depends(get_db)):
     service = db.query(models.Service).filter(

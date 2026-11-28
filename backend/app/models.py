@@ -34,3 +34,18 @@ class Application(Base):
     estimated_cost = Column(Float, nullable=True)
     status = Column(String(30), default="Новая заявка")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    email = Column(String(100), nullable=False, unique=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="user")
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+
+
